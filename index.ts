@@ -1,8 +1,15 @@
 import { Client as DiscordClient } from 'discord.js'
 import { App as SlackClient } from '@slack/bolt'
 
-const { DISCORD_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_PORT } =
-  process.env
+const {
+  DISCORD_TOKEN,
+  SLACK_BOT_TOKEN,
+  SLACK_APP_TOKEN,
+  SLACK_PORT,
+  SLACK_CHANNEL,
+  DISCORD_GUILD,
+  DISCORD_CHANNEL,
+} = process.env
 
 if (!DISCORD_TOKEN) {
   throw new Error('.env not set up correctly...')
@@ -24,7 +31,15 @@ discord.once('clientReady', (readyClient) => {
 })
 
 discord.on('messageCreate', async (message) => {
-  console.log('discord message ', message.channelId, message.content)
+  if (message.author.bot || message.author.system) return
+  const text = message.content
+  console.log('discord message ', message.channelId, text)
+  if (SLACK_CHANNEL) {
+    await slack.client.chat.postMessage({
+      channel: SLACK_CHANNEL,
+      markdown_text: text,
+    })
+  }
 })
 
 // slack
@@ -37,9 +52,16 @@ const slack = new SlackClient({
 
 slack.message(async (event) => {
   const { message } = event
-  if (!message.subtype || message.subtype === 'bot_message') {
+  if (!message.subtype || message.subtype === 'file_share') {
     const text = message.text
     console.log('slack message   ', message.channel, text)
+    if (DISCORD_GUILD && DISCORD_CHANNEL) {
+      const guild = await discord.guilds.fetch(DISCORD_GUILD)
+      const channel = await guild.channels.fetch(DISCORD_CHANNEL)
+      if (channel?.isSendable()) {
+        await channel.send(text || '?')
+      }
+    }
   }
 })
 

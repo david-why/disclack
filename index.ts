@@ -1,5 +1,8 @@
 import { Client as DiscordClient } from 'discord.js'
 import { App as SlackClient } from '@slack/bolt'
+import { SlackCache } from './src/caches'
+import { getSlackUserDisplayFields } from './src/utils'
+import 'global-agent/bootstrap'
 
 const {
   DISCORD_TOKEN,
@@ -7,8 +10,7 @@ const {
   SLACK_APP_TOKEN,
   SLACK_PORT,
   SLACK_CHANNEL,
-  DISCORD_GUILD,
-  DISCORD_CHANNEL,
+  DISCORD_WEBHOOK,
 } = process.env
 
 if (!DISCORD_TOKEN) {
@@ -30,6 +32,10 @@ discord.once('clientReady', (readyClient) => {
   console.log(`Discord ready! Logged in as ${readyClient.user.tag}`)
 })
 
+discord.on('error', (error) => {
+  console.error(error)
+})
+
 discord.on('messageCreate', async (message) => {
   if (message.author.bot || message.author.system) return
   const text = message.content
@@ -38,6 +44,8 @@ discord.on('messageCreate', async (message) => {
     await slack.client.chat.postMessage({
       channel: SLACK_CHANNEL,
       markdown_text: text,
+      icon_url: message.author.avatarURL() || message.author.defaultAvatarURL,
+      username: message.author.displayName,
     })
   }
 })
@@ -50,17 +58,20 @@ const slack = new SlackClient({
   appToken: SLACK_APP_TOKEN,
 })
 
+const slackCache = new SlackCache(slack)
+
 slack.message(async (event) => {
   const { message } = event
   if (!message.subtype || message.subtype === 'file_share') {
     const text = message.text
     console.log('slack message   ', message.channel, text)
-    if (DISCORD_GUILD && DISCORD_CHANNEL) {
-      const guild = await discord.guilds.fetch(DISCORD_GUILD)
-      const channel = await guild.channels.fetch(DISCORD_CHANNEL)
-      if (channel?.isSendable()) {
-        await channel.send(text || '?')
-      }
+    if (DISCORD_WEBHOOK) {
+      const user = await slackCache.getUser(message.user)
+      const webhook = await discord.fetchWebhook(DISCORD_WEBHOOK)
+      await webhook.send({
+        content: text || '?',
+        ...getSlackUserDisplayFields(user.user),
+      })
     }
   }
 })

@@ -1,0 +1,16 @@
+{
+  "name": "disclack",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.5.0",
+    "discord.js": "^14.23.2"
+  }
+}

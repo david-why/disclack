@@ -5,6 +5,11 @@ import { AttachmentBuilder, Client as DiscordClient } from 'discord.js'
 import { Stream } from 'stream'
 import { SlackCache } from './src/caches'
 import { getSlackUserDisplayFields } from './src/utils'
+import {
+  ensureInit,
+  getMappingByDiscord,
+  getMappingBySlack,
+} from './src/database'
 
 const {
   DISCORD_TOKEN,
@@ -48,52 +53,52 @@ discord.on('debug', (message) => {
 
 discord.on('messageCreate', async (message) => {
   if (message.author.bot || message.author.system) return
+  const mapping = await getMappingByDiscord(message.channelId)
+  if (!mapping) return
   const text = message.content
   console.log('discord message ', message.channelId, text)
-  if (SLACK_CHANNEL) {
-    // here's the logic in case i forget:
-    // - if there are files, upload the files and send blocks as part of files.uploadV2
-    // - if there are no files, just send the blocks
-    // NEVER MIND we're gonna send blocks in any case so that we can use username and icon_url
-    const blocks: KnownBlock[] = [
-      {
-        type: 'markdown',
-        text: text,
-      },
-    ]
-    let previewText = text
-    if (message.attachments.size) {
-      const slackFiles = await Promise.all(
-        message.attachments.values().map(downloadAttachmentFromDiscord)
-      )
-      console.log('got files from discord', slackFiles)
-      const uploadedSpecs = await Promise.all(slackFiles.map(uploadFileToSlack))
-      console.log('uploaded files to slack', uploadedSpecs)
-      const uploadedFiles = await slack.client.files.completeUploadExternal({
-        files: uploadedSpecs as [FileUploadComplete, ...FileUploadComplete[]],
-      })
-      console.log(uploadedFiles)
-      const content = uploadedFiles
-        .files!.map((f) => `<${f.permalink}| >`)
-        .join(' ')
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: content,
-        },
-      })
-      // for some reason this magically makes slack work
-      previewText += '\n' + content
-    }
-    await slack.client.chat.postMessage({
-      channel: SLACK_CHANNEL,
-      text: previewText,
-      blocks,
-      icon_url: message.author.avatarURL() || message.author.defaultAvatarURL,
-      username: message.author.displayName,
+  // here's the logic in case i forget:
+  // - if there are files, upload the files and send blocks as part of files.uploadV2
+  // - if there are no files, just send the blocks
+  // NEVER MIND we're gonna send blocks in any case so that we can use username and icon_url
+  const blocks: KnownBlock[] = [
+    {
+      type: 'markdown',
+      text: text,
+    },
+  ]
+  let previewText = text
+  if (message.attachments.size) {
+    const slackFiles = await Promise.all(
+      message.attachments.values().map(downloadAttachmentFromDiscord)
+    )
+    console.log('got files from discord', slackFiles)
+    const uploadedSpecs = await Promise.all(slackFiles.map(uploadFileToSlack))
+    console.log('uploaded files to slack', uploadedSpecs)
+    const uploadedFiles = await slack.client.files.completeUploadExternal({
+      files: uploadedSpecs as [FileUploadComplete, ...FileUploadComplete[]],
     })
+    console.log(uploadedFiles)
+    const content = uploadedFiles
+      .files!.map((f) => `<${f.permalink}| >`)
+      .join(' ')
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: content,
+      },
+    })
+    // for some reason this magically makes slack work
+    previewText += '\n' + content
   }
+  await slack.client.chat.postMessage({
+    channel: mapping.slack_channel,
+    text: previewText,
+    blocks,
+    icon_url: message.author.avatarURL() || message.author.defaultAvatarURL,
+    username: message.author.displayName,
+  })
 })
 
 async function downloadAttachmentFromDiscord({
@@ -158,33 +163,33 @@ const slackCache = new SlackCache(slack)
 slack.message(async (event) => {
   const { message } = event
   if (!message.subtype || message.subtype === 'file_share') {
+    const mapping = await getMappingBySlack(message.channel)
+    if (!mapping) return
     const text = message.text
     console.log('slack message   ', message.channel, text)
-    if (DISCORD_WEBHOOK) {
-      const [user, webhook] = await Promise.all([
-        slackCache.getUser(message.user),
-        discord.fetchWebhook(DISCORD_WEBHOOK),
-      ])
-      const files: AttachmentBuilder[] = []
-      for (const file of message.files || []) {
-        console.log(file)
-        const content = await fetch(file.url_private_download!, {
-          headers: {
-            Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
-          },
-        }).then((r) => r.body!)
-        files.push(
-          new AttachmentBuilder(Stream.Readable.from(content)).setName(
-            file.name || ''
-          )
+    const [user, webhook] = await Promise.all([
+      slackCache.getUser(message.user),
+      discord.fetchWebhook(mapping.discord_webhook),
+    ])
+    const files: AttachmentBuilder[] = []
+    for (const file of message.files || []) {
+      console.log(file)
+      const content = await fetch(file.url_private_download!, {
+        headers: {
+          Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+        },
+      }).then((r) => r.body!)
+      files.push(
+        new AttachmentBuilder(Stream.Readable.from(content)).setName(
+          file.name || ''
         )
-      }
-      await webhook.send({
-        content: text,
-        files,
-        ...getSlackUserDisplayFields(user.user),
-      })
+      )
     }
+    await webhook.send({
+      content: text,
+      files,
+      ...getSlackUserDisplayFields(user.user),
+    })
   }
 })
 
@@ -202,3 +207,4 @@ async function startSlack() {
 
 startDiscord()
 startSlack()
+ensureInit()

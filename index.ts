@@ -1,9 +1,10 @@
-import { AttachmentBuilder, Client as DiscordClient } from 'discord.js'
 import { LogLevel, App as SlackClient } from '@slack/bolt'
-import { SlackCache } from './src/caches'
-import { getSlackUserDisplayFields } from './src/utils'
 import type { KnownBlock } from '@slack/types'
 import type { FileUploadComplete } from '@slack/web-api/dist/types/request/files'
+import { AttachmentBuilder, Client as DiscordClient } from 'discord.js'
+import { Stream } from 'stream'
+import { SlackCache } from './src/caches'
+import { getSlackUserDisplayFields } from './src/utils'
 
 const {
   DISCORD_TOKEN,
@@ -99,17 +100,18 @@ async function downloadAttachmentFromDiscord({
   url,
   name,
   title,
+  size,
 }: {
   url: string
   name: string
   title: string | null
+  size: number
 }) {
   return {
-    file: await fetch(url)
-      .then((r) => r.arrayBuffer())
-      .then(Buffer.from),
+    file: await fetch(url).then((r) => r.body!),
     filename: name,
     title: title || undefined,
+    size,
   }
 }
 
@@ -117,14 +119,16 @@ async function uploadFileToSlack({
   file,
   filename,
   title,
+  size,
 }: {
-  file: Buffer
+  file: ReadableStream
   filename: string
   title?: string
+  size: number
 }) {
   const { upload_url, file_id } = await slack.client.files.getUploadURLExternal(
     {
-      length: file.byteLength,
+      length: size,
       filename,
     }
   )
@@ -168,9 +172,11 @@ slack.message(async (event) => {
           headers: {
             Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
           },
-        }).then((r) => r.arrayBuffer())
+        }).then((r) => r.body!)
         files.push(
-          new AttachmentBuilder(Buffer.from(content)).setName(file.name || '')
+          new AttachmentBuilder(Stream.Readable.from(content)).setName(
+            file.name || ''
+          )
         )
       }
       await webhook.send({

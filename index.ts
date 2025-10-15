@@ -1,5 +1,5 @@
 import { AttachmentBuilder, Client as DiscordClient } from 'discord.js'
-import { App as SlackClient } from '@slack/bolt'
+import { LogLevel, App as SlackClient } from '@slack/bolt'
 import { SlackCache } from './src/caches'
 import { getSlackUserDisplayFields } from './src/utils'
 import type { KnownBlock } from '@slack/types'
@@ -37,6 +37,14 @@ discord.on('error', (error) => {
   console.error(error)
 })
 
+discord.on('warn', (warning) => {
+  console.warn(warning)
+})
+
+discord.on('debug', (message) => {
+  console.debug(message)
+})
+
 discord.on('messageCreate', async (message) => {
   if (message.author.bot || message.author.system) return
   const text = message.content
@@ -45,95 +53,91 @@ discord.on('messageCreate', async (message) => {
     // here's the logic in case i forget:
     // - if there are files, upload the files and send blocks as part of files.uploadV2
     // - if there are no files, just send the blocks
+    // NEVER MIND we're gonna send blocks in any case so that we can use username and icon_url
     const blocks: KnownBlock[] = [
       {
         type: 'markdown',
         text: text,
       },
     ]
+    let previewText = text
     if (message.attachments.size) {
-      // for (const [id, attachment] of message.attachments) {
-      //   const arrayBuffer = await fetch(attachment.url).then((r) =>
-      //     r.arrayBuffer()
-      //   )
-      //   const res1 = await slack.client.files.getUploadURLExternal({
-      //     length: attachment.size,
-      //     filename: attachment.name,
-      //   })
-      //   console.log(res1)
-      //   const uploadUrl = res1.upload_url!
-      //   const res2 = await fetch(uploadUrl, {
-      //     method: 'POST',
-      //     body: arrayBuffer,
-      //   })
-      //   if (!res2.ok) {
-      //     throw new Error('Failed to upload actual file')
-      //   }
-      //   console.log(await res2.text())
-      //   const res3 = await slack.client.files.completeUploadExternal({
-      //     files: [{ id: res1.file_id!, title: attachment.title || undefined }],
-      //   })
-      //   console.log(res3)
-      //   const permalink = res3.files?.[0]?.permalink
-      // }
-      const files = await Promise.all(
-        message.attachments
-          .values()
-          .toArray()
-          .map((a) =>
-            (async () => ({
-              file: await fetch(a.url)
-                .then((r) => r.arrayBuffer())
-                .then(Buffer.from),
-              filename: a.name,
-              title: a.title || undefined,
-            }))()
-          )
+      const slackFiles = await Promise.all(
+        message.attachments.values().map(downloadAttachmentFromDiscord)
       )
-      const filesWithId: FileUploadComplete[] = await Promise.all(
-        files.map((f) =>
-          (async () => ({ title: f.title, id: await uploadToSlackHelper(f) }))()
-        )
-      )
-      console.log(files)
-      await slack.client.files.completeUploadExternal({
-        files: filesWithId as [FileUploadComplete, ...FileUploadComplete[]],
-        initial_comment: text,
-        channel_id: SLACK_CHANNEL,
+      console.log('got files from discord', slackFiles)
+      const uploadedSpecs = await Promise.all(slackFiles.map(uploadFileToSlack))
+      console.log('uploaded files to slack', uploadedSpecs)
+      const uploadedFiles = await slack.client.files.completeUploadExternal({
+        files: uploadedSpecs as [FileUploadComplete, ...FileUploadComplete[]],
       })
-    } else {
-      await slack.client.chat.postMessage({
-        channel: SLACK_CHANNEL,
-        text: text,
-        blocks,
-        icon_url: message.author.avatarURL() || message.author.defaultAvatarURL,
-        username: message.author.displayName,
+      console.log(uploadedFiles)
+      const content = uploadedFiles
+        .files!.map((f) => `<${f.permalink}| >`)
+        .join(' ')
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: content,
+        },
       })
+      // for some reason this magically makes slack work
+      previewText += '\n' + content
     }
+    await slack.client.chat.postMessage({
+      channel: SLACK_CHANNEL,
+      text: previewText,
+      blocks,
+      icon_url: message.author.avatarURL() || message.author.defaultAvatarURL,
+      username: message.author.displayName,
+    })
   }
 })
 
-async function uploadToSlackHelper({
+async function downloadAttachmentFromDiscord({
+  url,
+  name,
+  title,
+}: {
+  url: string
+  name: string
+  title: string | null
+}) {
+  return {
+    file: await fetch(url)
+      .then((r) => r.arrayBuffer())
+      .then(Buffer.from),
+    filename: name,
+    title: title || undefined,
+  }
+}
+
+async function uploadFileToSlack({
   file,
   filename,
+  title,
 }: {
   file: Buffer
   filename: string
+  title?: string
 }) {
-  const res1 = await slack.client.files.getUploadURLExternal({
-    length: file.byteLength,
-    filename,
-  })
-  console.log(res1)
-  const uploadUrl = res1.upload_url!
-  const res2 = await fetch(uploadUrl, {
+  const { upload_url, file_id } = await slack.client.files.getUploadURLExternal(
+    {
+      length: file.byteLength,
+      filename,
+    }
+  )
+  if (!upload_url) return null
+  const res = await fetch(upload_url, {
     method: 'POST',
     body: file,
   })
-  if (!res2.ok) {
+  if (!res.ok) {
     throw new Error('Failed to upload actual file')
   }
-  return res1.file_id!
+  console.log('*****', await res.text())
+  return { title: title || filename, id: file_id! }
 }
 
 // slack
@@ -142,6 +146,7 @@ const slack = new SlackClient({
   token: SLACK_BOT_TOKEN,
   socketMode: true,
   appToken: SLACK_APP_TOKEN,
+  logLevel: LogLevel.DEBUG,
 })
 
 const slackCache = new SlackCache(slack)

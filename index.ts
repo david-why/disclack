@@ -21,7 +21,7 @@ if (!DISCORD_TOKEN || !SLACK_APP_TOKEN || !SLACK_BOT_TOKEN) {
 
 // discord
 
-const discord = new DiscordClient({
+export const discord = new DiscordClient({
   intents: [
     'Guilds',
     'MessageContent',
@@ -142,7 +142,7 @@ async function uploadFileToSlack({
 
 // slack
 
-const slack = new SlackClient({
+export const slack = new SlackClient({
   token: SLACK_BOT_TOKEN,
   socketMode: true,
   appToken: SLACK_APP_TOKEN,
@@ -173,7 +173,7 @@ slack.message(async (event) => {
     )
     await webhook.send({
       content: message.blocks
-        ? blocksToDiscord(message.blocks as KnownBlock[])
+        ? await blocksToDiscord(message.blocks as KnownBlock[])
         : mrkdwn && mrkdwnToDiscord(mrkdwn),
       files,
       ...getSlackUserDisplayFields(user.user),

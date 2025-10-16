@@ -10,7 +10,7 @@ import {
   getMappingByDiscord,
   getMappingBySlack,
 } from './src/database'
-import { mrkdwnToDiscord } from './src/converter'
+import { blocksToDiscord, mrkdwnToDiscord } from './src/converter'
 
 const { DISCORD_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_PORT } =
   process.env
@@ -172,7 +172,9 @@ slack.message(async (event) => {
         })
     )
     await webhook.send({
-      content: mrkdwn && mrkdwnToDiscord(mrkdwn),
+      content: message.blocks
+        ? blocksToDiscord(message.blocks as KnownBlock[])
+        : mrkdwn && mrkdwnToDiscord(mrkdwn),
       files,
       ...getSlackUserDisplayFields(user.user),
     })

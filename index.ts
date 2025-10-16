@@ -10,17 +10,12 @@ import {
   getMappingByDiscord,
   getMappingBySlack,
 } from './src/database'
+import { mrkdwnToDiscord } from './src/converter'
 
-const {
-  DISCORD_TOKEN,
-  SLACK_BOT_TOKEN,
-  SLACK_APP_TOKEN,
-  SLACK_PORT,
-  SLACK_CHANNEL,
-  DISCORD_WEBHOOK,
-} = process.env
+const { DISCORD_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_PORT } =
+  process.env
 
-if (!DISCORD_TOKEN) {
+if (!DISCORD_TOKEN || !SLACK_APP_TOKEN || !SLACK_BOT_TOKEN) {
   throw new Error('.env not set up correctly...')
 }
 
@@ -72,13 +67,10 @@ discord.on('messageCreate', async (message) => {
     const slackFiles = await Promise.all(
       message.attachments.values().map(downloadAttachmentFromDiscord)
     )
-    console.log('got files from discord', slackFiles)
     const uploadedSpecs = await Promise.all(slackFiles.map(uploadFileToSlack))
-    console.log('uploaded files to slack', uploadedSpecs)
     const uploadedFiles = await slack.client.files.completeUploadExternal({
       files: uploadedSpecs as [FileUploadComplete, ...FileUploadComplete[]],
     })
-    console.log(uploadedFiles)
     const content = uploadedFiles
       .files!.map((f) => `<${f.permalink}| >`)
       .join(' ')
@@ -145,7 +137,6 @@ async function uploadFileToSlack({
   if (!res.ok) {
     throw new Error('Failed to upload actual file')
   }
-  console.log('*****', await res.text())
   return { title: title || filename, id: file_id! }
 }
 
@@ -165,33 +156,40 @@ slack.message(async (event) => {
   if (!message.subtype || message.subtype === 'file_share') {
     const mapping = await getMappingBySlack(message.channel)
     if (!mapping) return
-    const text = message.text
-    console.log('slack message   ', message.channel, text)
+    const mrkdwn = message.text
+    console.log('slack message   ', message.channel, mrkdwn)
     const [user, webhook] = await Promise.all([
       slackCache.getUser(message.user),
       discord.fetchWebhook(mapping.discord_webhook),
     ])
-    const files: AttachmentBuilder[] = []
-    for (const file of message.files || []) {
-      console.log(file)
-      const content = await fetch(file.url_private_download!, {
-        headers: {
-          Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
-        },
-      }).then((r) => r.body!)
-      files.push(
-        new AttachmentBuilder(Stream.Readable.from(content)).setName(
-          file.name || ''
-        )
-      )
-    }
+    const downloadedFiles = await Promise.all(
+      (message.files || []).map(downloadFileFromSlack)
+    )
+    const files: AttachmentBuilder[] = downloadedFiles.map(
+      (f) =>
+        new AttachmentBuilder(Stream.Readable.from(f.content), {
+          name: f.name || undefined,
+        })
+    )
     await webhook.send({
-      content: text,
+      content: mrkdwn && mrkdwnToDiscord(mrkdwn),
       files,
       ...getSlackUserDisplayFields(user.user),
     })
   }
 })
+
+async function downloadFileFromSlack(file: {
+  url_private_download?: string
+  name: string | null
+}) {
+  const content = await fetch(file.url_private_download!, {
+    headers: {
+      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+    },
+  }).then((r) => r.body!)
+  return { ...file, content }
+}
 
 // startup
 

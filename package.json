@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@slack/bolt": "^4.5.0",
-    "discord.js": "^14.23.2"
+    "discord-markdown": "^2.5.1",
+    "discord.js": "^14.23.2",
+    "slack-markdown": "^0.3.0"
   }
 }

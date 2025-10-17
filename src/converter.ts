@@ -7,10 +7,47 @@ import type {
 } from '@slack/types'
 import { slack } from '..'
 import { getMappingBySlack, getUserBySlack } from './database'
+import Turndown from 'turndown'
+import { toHTML as mrkdwnToHTML } from 'slack-markdown'
+import { escapeHTML } from 'bun'
+
+const discordTurndown = new Turndown({
+  emDelimiter: '*',
+  strongDelimiter: '**',
+  bulletListMarker: '-',
+})
+discordTurndown.addRule('underline', {
+  filter: 'u',
+  replacement: (t) => `__${t}__`,
+})
+discordTurndown.addRule('strikethrough', {
+  filter: ['s', 'strike', 'del'],
+  replacement: (t) => `~~${t}~~`,
+})
+// TODO: user, channel, etc tags
 
 export function mrkdwnToDiscord(mrkdwn: string) {
-  // TODO: implement this
-  return mrkdwn
+  return discordTurndown.turndown(
+    mrkdwnToHTML(mrkdwn, {
+      slackCallbacks: {
+        user: ({ id, name }) => `<user id="${id}">${escapeHTML(name)}</user>`,
+        channel: ({ id, name }) =>
+          `<channel id="${id}">${escapeHTML(name)}</channel>`,
+        usergroup: ({ id, name }) =>
+          `<usergroup id="${id}">${escapeHTML(name)}</usergroup>`,
+        atHere: ({ name }) => `<athere>${escapeHTML(name)}</athere>`,
+        atChannel: ({ name }) => `<atchannel>${escapeHTML(name)}</atchannel>`,
+        atEveryone: ({ name }) =>
+          `<ateveryone>${escapeHTML(name)}</ateveryone>`,
+        date: ({ timestamp, format, link, fallback }) =>
+          `<fmtdate ts="${escapeHTML(timestamp)}" format="${escapeHTML(
+            format
+          )}"${link ? ` href="${escapeHTML(link)}"` : ''}>${escapeHTML(
+            fallback
+          )}</fmtdate>`,
+      },
+    })
+  )
 }
 
 export async function blocksToDiscord(blocks: KnownBlock[]) {

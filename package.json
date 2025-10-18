@@ -5,15 +5,18 @@
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/turndown": "^5.0.5"
+    "@types/turndown": "^5.0.5",
+    "tsx": "^4.20.6"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
     "@slack/bolt": "^4.5.0",
+    "bufferutil": "^4.0.9",
     "discord-markdown": "^2.5.1",
     "discord.js": "^14.23.2",
+    "https-proxy-agent": "^7.0.6",
     "slack-markdown": "^0.3.0",
     "turndown": "^7.2.1"
   }

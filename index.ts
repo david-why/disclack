@@ -10,7 +10,8 @@ import {
   getMappingByDiscord,
   getMappingBySlack,
 } from './src/database'
-import { blocksToDiscord, mrkdwnToDiscord } from './src/converter'
+import { blocksToDiscord, mrkdwnToDiscord } from './src/converter/slack'
+import { discordToSlack } from './src/converter/discord'
 
 const { DISCORD_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_PORT } =
   process.env
@@ -59,7 +60,7 @@ discord.on('messageCreate', async (message) => {
   const blocks: KnownBlock[] = [
     {
       type: 'markdown',
-      text: text,
+      text: await discordToSlack(text),
     },
   ]
   let previewText = text

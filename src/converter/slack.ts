@@ -1,3 +1,5 @@
+// from slack to discord
+
 import type {
   KnownBlock,
   RichTextBlock,
@@ -5,8 +7,8 @@ import type {
   RichTextElement,
   RichTextStyleable,
 } from '@slack/types'
-import { slack } from '..'
-import { getMappingBySlack, getUserBySlack } from './database'
+import { slack } from '../..'
+import { getMappingBySlack, getUserBySlack } from '../database'
 import Turndown from 'turndown'
 import { toHTML as mrkdwnToHTML } from 'slack-markdown'
 import { escapeHTML } from 'bun'

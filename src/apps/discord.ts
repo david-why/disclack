@@ -1,8 +1,17 @@
 import type { KnownBlock } from '@slack/types'
 import type { FileUploadComplete } from '@slack/web-api/dist/types/request/files'
-import { Client as DiscordClient } from 'discord.js'
+import {
+  ChatInputCommandInteraction,
+  Client as DiscordClient,
+  Routes,
+  SlashCommandBuilder,
+} from 'discord.js'
 import { discordToSlack } from '../converter/discord'
-import { getMappingByDiscord } from '../database'
+import {
+  getMappingByDiscord,
+  getUserByDiscord,
+  getUserBySlack,
+} from '../database'
 import { slack } from './slack'
 
 const { DISCORD_TOKEN } = process.env
@@ -10,6 +19,18 @@ const { DISCORD_TOKEN } = process.env
 if (!DISCORD_TOKEN) {
   throw new Error('.env not set up correctly...')
 }
+
+const commands = [
+  {
+    data: new SlashCommandBuilder()
+      .setName('auth')
+      .setDescription('Link your Discord user with your Slack user')
+      .addStringOption((b) =>
+        b.setName('user').setDescription('Your Slack user ID').setRequired(true)
+      ),
+    execute: authCommand,
+  },
+]
 
 export const discord = new DiscordClient({
   intents: [
@@ -20,8 +41,12 @@ export const discord = new DiscordClient({
   ],
 })
 
-discord.once('clientReady', (readyClient) => {
-  console.log(`Discord ready! Logged in as ${readyClient.user.tag}`)
+discord.once('clientReady', async (client) => {
+  console.log(`Discord ready! Logged in as ${client.user.tag}`)
+  console.log(`Discord: Registering ${commands.length} slash commands`)
+  await client.rest.put(Routes.applicationCommands(client.application.id), {
+    body: commands.map((c) => c.data.toJSON()),
+  })
 })
 
 discord.on('error', (error) => {
@@ -35,6 +60,8 @@ discord.on('warn', (warning) => {
 discord.on('debug', (message) => {
   console.debug(message)
 })
+
+// message event
 
 discord.on('messageCreate', async (message) => {
   if (message.author.bot || message.author.system) return
@@ -83,6 +110,99 @@ discord.on('messageCreate', async (message) => {
   })
 })
 
+// commands
+
+discord.on('interactionCreate', async (interaction) => {
+  if (interaction.isChatInputCommand()) {
+    const cmd = commands.find((c) => c.data.name === interaction.commandName)
+    if (cmd) {
+      await cmd.execute(interaction)
+    }
+  }
+})
+
+async function authCommand(interaction: ChatInputCommandInteraction) {
+  const slackUserId = interaction.options.getString('user', true)
+  if (!slackUserId.match(/^U[A-Z0-9]+$/)) {
+    await interaction.reply({
+      flags: 'Ephemeral',
+      content: 'The Slack ID you typed was invalid.',
+    })
+  }
+  await interaction.deferReply({ flags: 'Ephemeral' })
+  const discordUserId = interaction.user.id
+  const [discordUserInfo, slackUserInfo] = await Promise.all([
+    getUserByDiscord(discordUserId),
+    getUserBySlack(slackUserId),
+  ])
+  if (discordUserInfo) {
+    await interaction.editReply(
+      `:x: Your Discord is already linked to Slack user \`${discordUserInfo.slack_id}\`!`
+    )
+    return
+  }
+  if (slackUserInfo) {
+    await interaction.editReply(
+      `:x: This Slack user is already linked to <@${slackUserInfo.discord_id}>!`
+    )
+    return
+  }
+  try {
+    const openChannelResponse = await slack.client.conversations.open({
+      users: slackUserId,
+    })
+    if (!openChannelResponse.channel?.id) {
+      throw new Error(
+        `Failed to open an IM: ${JSON.stringify(openChannelResponse)}`
+      )
+    }
+    await slack.client.chat.postMessage({
+      channel: openChannelResponse.channel.id,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'plain_text',
+            text: `Someone requested to link your Slack account with this Discord account: @${interaction.user.displayName} (username: ${interaction.user.username}#${interaction.user.discriminator}).\n* If this was you, please click the button below to verify.\n* If this wasn't you, you can safely ignore this message.`,
+          },
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              action_id: `discord_approve_${discordUserId}`,
+              text: { type: 'plain_text', text: '✅ Approve' },
+              style: 'primary',
+            },
+          ],
+        },
+      ],
+    })
+  } catch (e) {
+    console.error(`Error sending verification message to Slack: ${e}`)
+    await interaction.editReply(
+      ':x: Failed to send verification message to Slack. Please try again later.'
+    )
+    return
+  }
+  // try {
+  //   await insertUser({
+  //     slack_id: slackUserId,
+  //     discord_id: discordUserId,
+  //   })
+  // } catch (e) {
+  //   console.error('Error while inserting user from Discord', e)
+  //   await interaction.editReply(
+  //     `:x: An error occurred. Please try again later :(`
+  //   )
+  //   return
+  // }
+  await interaction.editReply(
+    ':watch: Please check your Slack account for a DM from @disclack to verify.'
+  )
+}
+
 async function downloadAttachmentFromDiscord({
   url,
   name,
@@ -129,8 +249,6 @@ async function uploadFileToSlack({
   }
   return { title: title || filename, id: file_id! }
 }
-
-// startup
 
 export async function startDiscord() {
   await discord.login(DISCORD_TOKEN)

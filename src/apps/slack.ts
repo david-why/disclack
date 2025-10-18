@@ -4,7 +4,7 @@ import { AttachmentBuilder } from 'discord.js'
 import { Stream } from 'stream'
 import { SlackCache } from '../caches'
 import { blocksToDiscord, mrkdwnToDiscord } from '../converter/slack'
-import { getMappingBySlack } from '../database'
+import { getMappingBySlack, insertUser } from '../database'
 import { getSlackUserDisplayFields } from '../utils'
 import { discord } from './discord'
 
@@ -22,6 +22,8 @@ export const slack = new SlackClient({
 })
 
 const slackCache = new SlackCache(slack)
+
+// message event
 
 slack.message(async (event) => {
   const { message } = event
@@ -64,6 +66,35 @@ async function downloadFileFromSlack(file: {
   }).then((r) => r.body!)
   return { ...file, content }
 }
+
+// link to discord
+
+slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
+  await ack()
+  if (body.type === 'block_actions') {
+    const slackUserId = body.user.id
+    const discordUserId = body.actions[0]?.action_id.substring(16)
+    if (!discordUserId) {
+      await respond('The button you clicked was invalid.')
+      return
+    }
+    try {
+      await insertUser({
+        slack_id: slackUserId,
+        discord_id: discordUserId,
+      })
+    } catch (e) {
+      console.error(`Failed to create a user from slack verification: ${e}`)
+      await respond(
+        ':x: There was an error linking your accounts. Please try again later.'
+      )
+      return
+    }
+    await respond(
+      ':white_check_mark: Successfully linked your account with Discord.'
+    )
+  }
+})
 
 // startup
 

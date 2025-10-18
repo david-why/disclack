@@ -31,6 +31,10 @@ export async function getMappingByDiscord(channel: Snowflake) {
   return entries[0]
 }
 
+export async function insertMapping(mapping: Omit<DBMapping, 'id'>) {
+  await sql`INSERT INTO mappings ${sql(mapping)}`
+}
+
 export async function getUserBySlack(user: string) {
   const entries = await sql<
     DBUser[]
@@ -43,4 +47,8 @@ export async function getUserByDiscord(user: Snowflake) {
     DBUser[]
   >`SELECT * FROM users WHERE discord_id = ${user}`
   return entries[0]
+}
+
+export async function insertUser(user: DBUser) {
+  await sql`INSERT INTO users ${sql(user)}`
 }

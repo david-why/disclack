@@ -8,6 +8,6 @@ CREATE TABLE IF NOT EXISTS mappings (
 
 CREATE TABLE IF NOT EXISTS users (
     slack_id TEXT NOT NULL PRIMARY KEY,
-    discord_id TEXT NOT NULL
+    discord_id TEXT NOT NULL UNIQUE
 );
 CREATE INDEX IF NOT EXISTS idx_users_discord_id ON users (discord_id);

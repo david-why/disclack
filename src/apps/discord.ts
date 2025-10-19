@@ -1,16 +1,20 @@
 import type { KnownBlock } from '@slack/types'
 import type { FileUploadComplete } from '@slack/web-api/dist/types/request/files'
 import {
+  ChannelType,
   ChatInputCommandInteraction,
   Client as DiscordClient,
+  PermissionFlagsBits,
   Routes,
   SlashCommandBuilder,
 } from 'discord.js'
 import { discordToSlack } from '../converter/discord'
 import {
   getMappingByDiscord,
+  getMappingBySlack,
   getUserByDiscord,
   getUserBySlack,
+  insertMapping,
 } from '../database'
 import { slack } from './slack'
 
@@ -23,12 +27,31 @@ if (!DISCORD_TOKEN) {
 const commands = [
   {
     data: new SlashCommandBuilder()
-      .setName('auth')
+      .setName('link')
       .setDescription('Link your Discord user with your Slack user')
       .addStringOption((b) =>
         b.setName('user').setDescription('Your Slack user ID').setRequired(true)
       ),
-    execute: authCommand,
+    execute: linkCommand,
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('connect')
+      .setDescription('Connect a Discord channel with a Slack channel')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+      .addChannelOption((b) =>
+        b
+          .setName('channel')
+          .setDescription('Discord channel to connect')
+          .setRequired(true)
+      )
+      .addStringOption((b) =>
+        b
+          .setName('slack-channel')
+          .setDescription('Slack channel to connect')
+          .setRequired(true)
+      ),
+    execute: connectCommand,
   },
 ]
 
@@ -121,13 +144,14 @@ discord.on('interactionCreate', async (interaction) => {
   }
 })
 
-async function authCommand(interaction: ChatInputCommandInteraction) {
+async function linkCommand(interaction: ChatInputCommandInteraction) {
   const slackUserId = interaction.options.getString('user', true)
   if (!slackUserId.match(/^U[A-Z0-9]+$/)) {
     await interaction.reply({
       flags: 'Ephemeral',
       content: 'The Slack ID you typed was invalid.',
     })
+    return
   }
   await interaction.deferReply({ flags: 'Ephemeral' })
   const discordUserId = interaction.user.id
@@ -151,19 +175,19 @@ async function authCommand(interaction: ChatInputCommandInteraction) {
     const openChannelResponse = await slack.client.conversations.open({
       users: slackUserId,
     })
-    if (!openChannelResponse.channel?.id) {
+    if (!openChannelResponse.ok) {
       throw new Error(
         `Failed to open an IM: ${JSON.stringify(openChannelResponse)}`
       )
     }
     await slack.client.chat.postMessage({
-      channel: openChannelResponse.channel.id,
+      channel: openChannelResponse.channel!.id!,
       blocks: [
         {
           type: 'section',
           text: {
             type: 'plain_text',
-            text: `Someone requested to link your Slack account with this Discord account: @${interaction.user.displayName} (username: ${interaction.user.username}#${interaction.user.discriminator}).\n* If this was you, please click the button below to verify.\n* If this wasn't you, you can safely ignore this message.`,
+            text: `Someone requested to link your Slack account with this Discord account: @${interaction.user.displayName} (username: ${interaction.user.tag}).\n* If this was you, please click the button below to verify.\n* If this wasn't you, you can safely ignore this message.`,
           },
         },
         {
@@ -186,20 +210,110 @@ async function authCommand(interaction: ChatInputCommandInteraction) {
     )
     return
   }
-  // try {
-  //   await insertUser({
-  //     slack_id: slackUserId,
-  //     discord_id: discordUserId,
-  //   })
-  // } catch (e) {
-  //   console.error('Error while inserting user from Discord', e)
-  //   await interaction.editReply(
-  //     `:x: An error occurred. Please try again later :(`
-  //   )
-  //   return
-  // }
   await interaction.editReply(
     ':watch: Please check your Slack account for a DM from @disclack to verify.'
+  )
+}
+
+async function connectCommand(interaction: ChatInputCommandInteraction) {
+  const { id: discordChannelId, type: discordChannelType } =
+    interaction.options.getChannel('channel', true)
+  const slackChannelId = interaction.options.getString('slack-channel', true)
+  if (!slackChannelId.match(/^C[0-9A-Z]+$/)) {
+    await interaction.reply({
+      flags: 'Ephemeral',
+      content: 'The Slack channel ID you typed was invalid.',
+    })
+    return
+  }
+  if (discordChannelType !== ChannelType.GuildText) {
+    await interaction.reply({
+      flags: 'Ephemeral',
+      content: 'You can only connect a Discord text channel.',
+    })
+    return
+  }
+  await interaction.deferReply({ flags: 'Ephemeral' })
+  const [user, slackChannel, discordChannel, slackMapping, discordMapping] =
+    await Promise.all([
+      getUserByDiscord(interaction.user.id),
+      (async () => {
+        try {
+          return await slack.client.conversations.info({
+            channel: slackChannelId,
+          })
+        } catch {
+          return { ok: false }
+        }
+      })(),
+      discord.channels.fetch(discordChannelId),
+      getMappingBySlack(slackChannelId),
+      getMappingByDiscord(discordChannelId),
+    ])
+  if (discordChannel?.type !== ChannelType.GuildText) {
+    throw new Error('channel type sanity check failed')
+  }
+  if (!user) {
+    await interaction.editReply(
+      'You must link yourself with the /link command before you can connect channels.'
+    )
+    return
+  }
+  if (!slackChannel?.ok) {
+    await interaction.editReply(
+      'The Slack channel you typed does not exist or is private and the bot is not invited.'
+    )
+    return
+  }
+  if (slackMapping) {
+    await interaction.editReply(
+      `The Slack channel is already linked to a Discord channel (<#${slackMapping.discord_channel}>).`
+    )
+    return
+  }
+  if (discordMapping) {
+    await interaction.editReply(
+      `The Discord channel is already linked to the Slack channel \`${discordMapping.slack_channel}\`.`
+    )
+    return
+  }
+  if (user.slack_id !== slackChannel.channel?.creator) {
+    await interaction.editReply(
+      'You have to be the channel creator to link a channel.'
+    )
+    return
+  }
+  if (!slackChannel.channel?.is_member) {
+    try {
+      await slack.client.conversations.join({ channel: slackChannelId })
+    } catch (e) {
+      console.error(`Failed to join channel: ${e}`)
+      await interaction.editReply(
+        'Failed to join the channel. Please invite the @disclack bot to the Slack channel, then try again.'
+      )
+      return
+    }
+  }
+  const webhook = await discordChannel.createWebhook({
+    name: `disclack connection to #${
+      slackChannel.channel?.name || '(unknown)'
+    }`,
+  })
+  try {
+    await insertMapping({
+      slack_channel: slackChannelId,
+      discord_channel: discordChannelId,
+      discord_webhook: webhook.id,
+    })
+  } catch (e) {
+    console.error(`Failed to create channel mapping from Discord: ${e}`)
+    await interaction.editReply(
+      'Failed to create the channel mapping. Please try again later.'
+    )
+    return
+  }
+  await interaction.editReply(
+    ':white_check_mark: Successfully created channel connection!'
   )
 }
 

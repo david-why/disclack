@@ -8,9 +8,15 @@ import { getMappingBySlack, insertUser } from '../database'
 import { getSlackUserDisplayFields } from '../utils'
 import { discord } from './discord'
 
-const { SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_PORT } = process.env
+const {
+  SLACK_BOT_TOKEN,
+  SLACK_APP_TOKEN,
+  SLACK_PORT,
+  DISCORD_ROLE,
+  DISCORD_GUILD,
+} = process.env
 
-if (!SLACK_APP_TOKEN || !SLACK_BOT_TOKEN) {
+if (!SLACK_APP_TOKEN || !SLACK_BOT_TOKEN || !DISCORD_GUILD) {
   throw new Error('.env not set up correctly...')
 }
 
@@ -71,29 +77,38 @@ async function downloadFileFromSlack(file: {
 
 slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
   await ack()
-  if (body.type === 'block_actions') {
-    const slackUserId = body.user.id
-    const discordUserId = body.actions[0]?.action_id.substring(16)
-    if (!discordUserId) {
-      await respond('The button you clicked was invalid.')
-      return
-    }
-    try {
-      await insertUser({
-        slack_id: slackUserId,
-        discord_id: discordUserId,
-      })
-    } catch (e) {
-      console.error(`Failed to create a user from slack verification: ${e}`)
-      await respond(
-        ':x: There was an error linking your accounts. Please try again later.'
-      )
-      return
-    }
-    await respond(
-      ':white_check_mark: Successfully linked your account with Discord.'
-    )
+  if (body.type !== 'block_actions') return
+  const slackUserId = body.user.id
+  const discordUserId = body.actions[0]?.action_id.substring(16)
+  if (!discordUserId) {
+    await respond({
+      text: 'The button you clicked was invalid.',
+      replace_original: false,
+    })
+    return
   }
+  try {
+    await insertUser({
+      slack_id: slackUserId,
+      discord_id: discordUserId,
+    })
+  } catch (e) {
+    console.error(`Failed to create a user from slack verification: ${e}`)
+    await respond({
+      text: ':x: There was an error linking your accounts. Please try again later.',
+      replace_original: false,
+    })
+    return
+  }
+  if (DISCORD_ROLE) {
+    const guild = await discord.guilds.fetch(DISCORD_GUILD)
+    const member = await guild.members.fetch(discordUserId)
+    await member.roles.add(DISCORD_ROLE, 'Verified account with disclack')
+  }
+  await respond({
+    text: ':white_check_mark: Successfully linked your account with Discord.',
+    replace_original: false,
+  })
 })
 
 // startup

@@ -52,3 +52,7 @@ export async function getUserByDiscord(user: Snowflake) {
 export async function insertUser(user: DBUser) {
   await sql`INSERT INTO users ${sql(user)}`
 }
+
+export async function deleteUserByDiscord(user: Snowflake) {
+  await sql`DELETE FROM users WHERE discord_id = ${user}`
+}

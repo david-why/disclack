@@ -1,15 +1,20 @@
 import type { KnownBlock } from '@slack/types'
 import type { FileUploadComplete } from '@slack/web-api/dist/types/request/files'
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
   Client as DiscordClient,
+  InteractionContextType,
   PermissionFlagsBits,
   Routes,
   SlashCommandBuilder,
 } from 'discord.js'
 import { discordToSlack } from '../converter/discord'
 import {
+  deleteUserByDiscord,
   getMappingByDiscord,
   getMappingBySlack,
   getUserByDiscord,
@@ -18,7 +23,7 @@ import {
 } from '../database'
 import { slack } from './slack'
 
-const { DISCORD_TOKEN } = process.env
+const { DISCORD_TOKEN, DISCORD_ROLE } = process.env
 
 if (!DISCORD_TOKEN) {
   throw new Error('.env not set up correctly...')
@@ -29,6 +34,7 @@ const commands = [
     data: new SlashCommandBuilder()
       .setName('link')
       .setDescription('Link your Discord user with your Slack user')
+      .setContexts(InteractionContextType.Guild)
       .addStringOption((b) =>
         b.setName('user').setDescription('Your Slack user ID').setRequired(true)
       ),
@@ -39,6 +45,7 @@ const commands = [
       .setName('connect')
       .setDescription('Connect a Discord channel with a Slack channel')
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+      .setContexts(InteractionContextType.Guild)
       .addChannelOption((b) =>
         b
           .setName('channel')
@@ -52,6 +59,13 @@ const commands = [
           .setRequired(true)
       ),
     execute: connectCommand,
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('unlink')
+      .setDescription('Unlink your Discord user with your Slack user')
+      .setContexts(InteractionContextType.Guild),
+    execute: unlinkCommand,
   },
 ]
 
@@ -315,6 +329,53 @@ async function connectCommand(interaction: ChatInputCommandInteraction) {
   await interaction.editReply(
     ':white_check_mark: Successfully created channel connection!'
   )
+}
+
+async function unlinkCommand(interaction: ChatInputCommandInteraction) {
+  const response = await interaction.deferReply({
+    flags: 'Ephemeral',
+    withResponse: true,
+  })
+  const userInfo = await getUserByDiscord(interaction.user.id)
+  if (!userInfo) {
+    await interaction.editReply(
+      'Your Slack account is not linked. Nothing to do.'
+    )
+    return
+  }
+  await interaction.editReply({
+    content: `Are you sure you want to unlink your Slack account?${
+      DISCORD_ROLE ? ` This will remove the <@&${DISCORD_ROLE}> role too.` : ''
+    }`,
+    components: [
+      new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId('confirm')
+            .setStyle(ButtonStyle.Danger)
+            .setLabel('Yes, unlink')
+        )
+        .toJSON(),
+    ],
+  })
+  try {
+    await response.resource!.message!.awaitMessageComponent({ time: 300000 })
+  } catch {
+    await interaction.editReply({
+      content: 'Confirmation timed out. Please try again.',
+      components: [],
+    })
+    return
+  }
+  await deleteUserByDiscord(interaction.user.id)
+  if (DISCORD_ROLE) {
+    const member = await interaction.guild!.members.fetch(interaction.user.id)
+    await member.roles.remove(DISCORD_ROLE)
+  }
+  await interaction.editReply({
+    content: ':white_check_mark: Successfully unlinked your account.',
+    components: [],
+  })
 }
 
 async function downloadAttachmentFromDiscord({

@@ -83,7 +83,6 @@ slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
   if (!discordUserId) {
     await respond({
       text: 'The button you clicked was invalid.',
-      replace_original: false,
     })
     return
   }
@@ -96,7 +95,6 @@ slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
     console.error(`Failed to create a user from slack verification: ${e}`)
     await respond({
       text: ':x: There was an error linking your accounts. Please try again later.',
-      replace_original: false,
     })
     return
   }
@@ -107,7 +105,6 @@ slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
   }
   await respond({
     text: ':white_check_mark: Successfully linked your account with Discord.',
-    replace_original: false,
   })
 })
 

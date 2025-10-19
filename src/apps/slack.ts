@@ -18,7 +18,7 @@ export const slack = new SlackClient({
   token: SLACK_BOT_TOKEN,
   socketMode: true,
   appToken: SLACK_APP_TOKEN,
-  logLevel: LogLevel.DEBUG,
+  logLevel: LogLevel.INFO,
 })
 
 const slackCache = new SlackCache(slack)

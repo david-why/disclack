@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/b4d55776-e25c-48bd-a4ec-80f79a436022
 
 ## Self-hosting instructions
 
-Here's how you can host your own copy of the bot:
+You might not need to self-host - you can invite the bot to another server, and it will Just Work™️! But if you do want to self-host, here's how you can host your own copy of the bot:
 
 ### Discord app setup
 

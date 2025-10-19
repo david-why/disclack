@@ -4,19 +4,13 @@ import { AttachmentBuilder } from 'discord.js'
 import { Stream } from 'stream'
 import { SlackCache } from '../caches'
 import { blocksToDiscord, mrkdwnToDiscord } from '../converter/slack'
-import { getMappingBySlack, insertUser } from '../database'
+import { getDiscordServer, getMappingBySlack, insertUser } from '../database'
 import { getSlackUserDisplayFields } from '../utils'
 import { discord } from './discord'
 
-const {
-  SLACK_BOT_TOKEN,
-  SLACK_APP_TOKEN,
-  SLACK_PORT,
-  DISCORD_ROLE,
-  DISCORD_GUILD,
-} = process.env
+const { SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_PORT } = process.env
 
-if (!SLACK_APP_TOKEN || !SLACK_BOT_TOKEN || !DISCORD_GUILD) {
+if (!SLACK_APP_TOKEN || !SLACK_BOT_TOKEN) {
   throw new Error('.env not set up correctly...')
 }
 
@@ -75,12 +69,13 @@ async function downloadFileFromSlack(file: {
 
 // link to discord
 
-slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
+slack.action(/^discord_approve2_[0-9]+_[0-9]+$/, async ({ ack, body, respond }) => {
   await ack()
   if (body.type !== 'block_actions') return
   const slackUserId = body.user.id
-  const discordUserId = body.actions[0]?.action_id.substring(16)
-  if (!discordUserId) {
+  const [discordGuildId, discordUserId] =
+    body.actions[0]?.action_id.substring(17).split('_') || ''
+  if (!discordGuildId || !discordUserId) {
     await respond({
       text: 'The button you clicked was invalid.',
     })
@@ -98,10 +93,11 @@ slack.action(/^discord_approve_[0-9]+$/, async ({ ack, body, respond }) => {
     })
     return
   }
-  if (DISCORD_ROLE) {
-    const guild = await discord.guilds.fetch(DISCORD_GUILD)
+  const server = await getDiscordServer(discordGuildId)
+  if (server?.role_id) {
+    const guild = await discord.guilds.fetch(discordGuildId)
     const member = await guild.members.fetch(discordUserId)
-    await member.roles.add(DISCORD_ROLE, 'Verified account with disclack')
+    await member.roles.add(server.role_id, 'Verified account with disclack')
   }
   await respond({
     text: ':white_check_mark: Successfully linked your account with Discord.',

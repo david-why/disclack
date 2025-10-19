@@ -1,6 +1,11 @@
 import { sql } from 'bun'
 import type { Snowflake } from 'discord.js'
 
+export interface DBDiscordServer {
+  id: Snowflake
+  role_id: Snowflake | null
+}
+
 export interface DBMapping {
   id: number
   slack_channel: string
@@ -15,6 +20,24 @@ export interface DBUser {
 
 export async function ensureInit() {
   await sql.file('sql/init.sql')
+}
+
+export async function getDiscordServer(id: Snowflake) {
+  const entries = await sql<
+    DBDiscordServer[]
+  >`SELECT * FROM discord_servers WHERE id = ${id}`
+  return entries[0]
+}
+
+export async function insertDiscordServer(server: DBDiscordServer) {
+  await sql`INSERT INTO discord_servers ${sql(server)}`
+  return server
+}
+
+export async function updateDiscordServer(server: DBDiscordServer) {
+  const data = { ...server, id: undefined }
+  delete data.id
+  await sql`UPDATE discord_servers SET ${sql(data)} WHERE id = ${server.id}`
 }
 
 export async function getMappingBySlack(channel: string) {

@@ -16,15 +16,18 @@ import { discordToSlack } from '../converter/discord'
 import {
   deleteMappingByDiscord,
   deleteUserByDiscord,
+  getDiscordServer,
   getMappingByDiscord,
   getMappingBySlack,
   getUserByDiscord,
   getUserBySlack,
+  insertDiscordServer,
   insertMapping,
+  updateDiscordServer,
 } from '../database'
 import { slack } from './slack'
 
-const { DISCORD_TOKEN, DISCORD_ROLE } = process.env
+const { DISCORD_TOKEN } = process.env
 
 if (!DISCORD_TOKEN) {
   throw new Error('.env not set up correctly...')
@@ -82,6 +85,24 @@ const commands = [
       ),
     execute: disconnectCommand,
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('config')
+      .setDescription('Configures or gets disclack settings for this server')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .setContexts(InteractionContextType.Guild)
+      .addRoleOption((b) =>
+        b
+          .setName('role')
+          .setDescription(
+            'Set the role that users receive when they link their Slack account'
+          )
+      )
+      .addBooleanOption((b) =>
+        b.setName('clear-role').setDescription('Clears the role setting')
+      ),
+    execute: configCommand,
+  },
 ]
 
 export const discord = new DiscordClient({
@@ -109,9 +130,9 @@ discord.on('warn', (warning) => {
   console.warn(warning)
 })
 
-discord.on('debug', (message) => {
-  console.debug(message)
-})
+// discord.on('debug', (message) => {
+//   console.debug(message)
+// })
 
 // message event
 
@@ -224,7 +245,7 @@ async function linkCommand(interaction: ChatInputCommandInteraction) {
           elements: [
             {
               type: 'button',
-              action_id: `discord_approve_${discordUserId}`,
+              action_id: `discord_approve2_${interaction.guildId!}_${discordUserId}`,
               text: { type: 'plain_text', text: '✅ Approve' },
               style: 'primary',
             },
@@ -358,9 +379,10 @@ async function unlinkCommand(interaction: ChatInputCommandInteraction) {
     )
     return
   }
+  const roleId = (await getDiscordServer(interaction.guildId!))?.role_id
   await interaction.editReply({
     content: `Are you sure you want to unlink your Slack account?${
-      DISCORD_ROLE ? ` This will remove the <@&${DISCORD_ROLE}> role too.` : ''
+      roleId ? ` This will remove the <@&${roleId}> role too.` : ''
     }`,
     components: [
       new ActionRowBuilder()
@@ -383,9 +405,9 @@ async function unlinkCommand(interaction: ChatInputCommandInteraction) {
     return
   }
   await deleteUserByDiscord(interaction.user.id)
-  if (DISCORD_ROLE) {
+  if (roleId) {
     const member = await interaction.guild!.members.fetch(interaction.user.id)
-    await member.roles.remove(DISCORD_ROLE)
+    await member.roles.remove(roleId)
   }
   await interaction.editReply({
     content: ':white_check_mark: Successfully unlinked your account.',
@@ -408,6 +430,29 @@ async function disconnectCommand(interaction: ChatInputCommandInteraction) {
   await interaction.editReply(
     `:white_check_mark: Succesfully disconnected <#${channel.id}> with Slack.`
   )
+}
+
+async function configCommand(interaction: ChatInputCommandInteraction) {
+  const role = interaction.options.getRole('role')
+  const clearRole = interaction.options.getBoolean('clear-role')
+  const isUpdating = !!(role || clearRole)
+  await interaction.deferReply({ flags: 'Ephemeral' })
+
+  const server =
+    (await getDiscordServer(interaction.guildId!)) ??
+    (await insertDiscordServer({ id: interaction.guildId!, role_id: null }))
+  if (clearRole) server.role_id = null
+  else if (role) server.role_id = role.id
+
+  if (isUpdating) await updateDiscordServer(server)
+
+  const firstLine = isUpdating
+    ? 'Updated server config! Here are the current settings:'
+    : 'Here are the current server settings:'
+  const roleText = server.role_id ? `<@&${server.role_id}>` : 'Not set'
+  const roleLine = `- Link role: ${roleText}`
+  const message = `${firstLine}\n${roleLine}`
+  await interaction.editReply(message)
 }
 
 async function downloadAttachmentFromDiscord({

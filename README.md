@@ -6,6 +6,19 @@ A bridge that links Discord channels with Slack channels.
 
 https://github.com/user-attachments/assets/b4d55776-e25c-48bd-a4ec-80f79a436022
 
+## Features
+
+- [x] Forward messages between Discord and Slack
+- [x] Reupload files
+- [x] Username and avatar matching
+- [ ] Management commands
+  - [x] Discord `/link`, `/unlink`, `/connect`, `/disconnect`
+  - [ ] Slack `/link`, `/unlink`, `/connect`, `/disconnect`
+- [ ] Formatting _(almost done, some minor bugs)_
+- [ ] Create threads
+- [ ] Forward reactions
+- [ ] More features??
+
 ## Usage
 
 1. You must be a Hack Clubber in the [Hack Club Slack](https://hackclub.com/slack).

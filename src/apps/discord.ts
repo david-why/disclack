@@ -14,6 +14,7 @@ import {
 } from 'discord.js'
 import { discordToSlack } from '../converter/discord'
 import {
+  deleteMappingByDiscord,
   deleteUserByDiscord,
   getMappingByDiscord,
   getMappingBySlack,
@@ -55,7 +56,7 @@ const commands = [
       .addStringOption((b) =>
         b
           .setName('slack-channel')
-          .setDescription('Slack channel to connect')
+          .setDescription('ID of Slack channel to connect')
           .setRequired(true)
       ),
     execute: connectCommand,
@@ -66,6 +67,20 @@ const commands = [
       .setDescription('Unlink your Discord user with your Slack user')
       .setContexts(InteractionContextType.Guild),
     execute: unlinkCommand,
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('disconnect')
+      .setDescription('Disconnect a Discord channel with Slack')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+      .setContexts(InteractionContextType.Guild)
+      .addChannelOption((b) =>
+        b
+          .setName('channel')
+          .setDescription('Discord channel to disconnect')
+          .setRequired(true)
+      ),
+    execute: disconnectCommand,
   },
 ]
 
@@ -279,15 +294,15 @@ async function connectCommand(interaction: ChatInputCommandInteraction) {
     )
     return
   }
-  if (slackMapping) {
-    await interaction.editReply(
-      `The Slack channel is already linked to a Discord channel (<#${slackMapping.discord_channel}>).`
-    )
-    return
-  }
   if (discordMapping) {
     await interaction.editReply(
       `The Discord channel is already linked to the Slack channel \`${discordMapping.slack_channel}\`.`
+    )
+    return
+  }
+  if (slackMapping) {
+    await interaction.editReply(
+      `The Slack channel is already linked to a Discord channel (<#${slackMapping.discord_channel}>).`
     )
     return
   }
@@ -376,6 +391,23 @@ async function unlinkCommand(interaction: ChatInputCommandInteraction) {
     content: ':white_check_mark: Successfully unlinked your account.',
     components: [],
   })
+}
+
+async function disconnectCommand(interaction: ChatInputCommandInteraction) {
+  const channel = interaction.options.getChannel('channel', true)
+  await interaction.deferReply({ flags: 'Ephemeral' })
+  const mapping = await getMappingByDiscord(channel.id)
+  if (!mapping) {
+    await interaction.editReply(
+      ':x: The channel specified is not connected to Slack.'
+    )
+    return
+  }
+  // TODO: make a confirmation thingy like /unlink
+  await deleteMappingByDiscord(channel.id)
+  await interaction.editReply(
+    `:white_check_mark: Succesfully disconnected <#${channel.id}> with Slack.`
+  )
 }
 
 async function downloadAttachmentFromDiscord({

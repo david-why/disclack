@@ -35,6 +35,10 @@ export async function insertMapping(mapping: Omit<DBMapping, 'id'>) {
   await sql`INSERT INTO mappings ${sql(mapping)}`
 }
 
+export async function deleteMappingByDiscord(channel: Snowflake) {
+  await sql`DELETE FROM mappings WHERE discord_channel = ${channel}`
+}
+
 export async function getUserBySlack(user: string) {
   const entries = await sql<
     DBUser[]

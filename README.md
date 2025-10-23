@@ -4,7 +4,7 @@ A bridge that links Discord channels with Slack channels.
 
 ## Demo
 
-https://github.com/user-attachments/assets/b4d55776-e25c-48bd-a4ec-80f79a436022
+You can watch the [demo video here](https://hc-cdn.hel1.your-objectstorage.com/s/v3/f268e572d78cdbc88d9f577eb0a331b513b31125_demo.mp4)!
 
 ## Features
 
